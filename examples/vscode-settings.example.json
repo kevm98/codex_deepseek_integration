@@ -1,0 +1,3 @@
+{
+  "chatgpt.cliExecutable": "/absolute/path/to/codex_deepseek_integration/scripts/codex-vscode-deepseek-bridge.js"
+}

@@ -1,0 +1,29 @@
+# Codex profile for DeepSeek V4 Pro via Moon Bridge.
+# Use this as a profile: codex --profile deepseek-v4-pro
+#
+# Place this at: ~/.codex/deepseek-v4-pro.config.toml
+# Update paths to match your home directory.
+
+model = "moonbridge"
+model_provider = "moonbridge"
+model_context_window = 1000000
+model_reasoning_summary = "none"
+model_supports_reasoning_summaries = false
+model_catalog_json = "/home/you/.codex/models_catalog.json"
+
+[model_providers.moonbridge]
+name = "Moon Bridge"
+base_url = "http://127.0.0.1:38440/v1"
+wire_api = "responses"
+
+[features]
+apps = false
+
+[plugins."gmail@openai-curated"]
+enabled = false
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[plugins."google-drive@openai-curated"]
+enabled = false

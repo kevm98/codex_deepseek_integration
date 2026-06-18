@@ -1,0 +1,17 @@
+# Codex profile for DeepSeek V4 Pro via LiteLLM fallback.
+# Use this as a profile: codex --profile deepseek-v4-pro
+#
+# Place this at: ~/.codex/deepseek-v4-pro.config.toml
+# Update paths to match your home directory.
+
+model = "deepseek-v4-pro"
+model_provider = "deepseek"
+model_catalog_json = "/home/you/.codex/codex-models-with-deepseek.json"
+model_context_window = 1000000
+model_reasoning_effort = "xhigh"
+model_reasoning_summary = "none"
+
+[model_providers.deepseek]
+name = "DeepSeek via LiteLLM"
+base_url = "http://127.0.0.1:4000/v1"
+wire_api = "responses"

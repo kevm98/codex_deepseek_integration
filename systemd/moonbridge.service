@@ -1,0 +1,24 @@
+# Moon Bridge systemd user service.
+# Copy to ~/.config/systemd/user/moonbridge.service and edit paths.
+#
+# Usage:
+#   cp systemd/moonbridge.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now moonbridge.service
+
+[Unit]
+Description=Moon Bridge for Codex DeepSeek profile
+After=network-online.target
+
+[Service]
+Type=simple
+# Update %h to your actual home directory if needed.
+Environment=CODEX_HOME=%h/.codex
+# Ensure DEEPSEEK_API_KEY is in your environment.
+# systemctl --user import-environment DEEPSEEK_API_KEY
+ExecStart=%h/.codex/bin/codex-moonbridge
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

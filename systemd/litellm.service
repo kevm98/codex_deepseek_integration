@@ -1,0 +1,25 @@
+# LiteLLM systemd user service (fallback path).
+# Copy to ~/.config/systemd/user/litellm.service and edit paths.
+#
+# Usage:
+#   cp systemd/litellm.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now litellm.service
+
+[Unit]
+Description=Codex DeepSeek LiteLLM bridge (fallback)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Update CODEX_HOME to your actual Codex home directory.
+WorkingDirectory=%h/.codex
+Environment=PYTHONPATH=%h/.codex
+Environment=NO_PROXY=127.0.0.1,localhost
+ExecStart=/usr/bin/env -u DEBUG %h/.codex/litellm-venv/bin/litellm --config %h/.codex/litellm-deepseek.yaml --host 127.0.0.1 --port 4000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -10,6 +10,8 @@ locally.
 This repository was checked with:
 
 - Codex CLI `0.141.0`
+- Go `1.26.4` for Moon Bridge builds
+- Moon Bridge `8254b41`
 - LiteLLM `1.89.2`
 - DeepSeek API model `deepseek-v4-pro`
 - `DEEPSEEK_API_KEY` provided by the environment
@@ -74,6 +76,8 @@ provider.
 
 - `docs/moonbridge.md`: recommended Moon Bridge setup based on DeepSeek's guide.
 - `docs/litellm-fallback.md`: fallback setup verified on this machine.
+- `scripts/install-moonbridge.sh`: installs Go when needed, builds Moon Bridge,
+  generates the Codex profile/catalog, and starts the user service.
 - `scripts/deepseek_codex_callbacks.py`: LiteLLM fallback callback that strips
   unsupported non-function tools.
 - `scripts/codex-deepseek-bridge`: LiteLLM fallback helper for starting,
@@ -97,10 +101,42 @@ provider.
   your installed Codex, clones the current `gpt-5.5` model metadata, and
   adds/replaces the DeepSeek entry for the LiteLLM fallback.
 - `systemd/codex-deepseek-bridge.service`: user service template.
+- `systemd/codex-moonbridge.service`: user service template for Moon Bridge.
 
 ## Recommended: Moon Bridge
 
-DeepSeek's official guide uses Moon Bridge:
+The automated path keeps GPT as the default Codex config, creates a separate
+DeepSeek profile, and reads the DeepSeek key from `DEEPSEEK_API_KEY` at runtime
+instead of storing it permanently in `~/.codex`.
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+./scripts/install-moonbridge.sh
+```
+
+The installer:
+
+- Installs official Go `1.26.4` under `~/.local/go` if Go `1.25+` is missing.
+- Clones Moon Bridge into `${CODEX_HOME:-$HOME/.codex}/moon-bridge`.
+- Builds `${CODEX_HOME:-$HOME/.codex}/bin/moonbridge`.
+- Writes `${CODEX_HOME:-$HOME/.codex}/bin/codex-moonbridge`, a launcher that
+  creates a private runtime YAML from `DEEPSEEK_API_KEY`.
+- Generates `${CODEX_HOME:-$HOME/.codex}/deepseek-v4-pro.config.toml` and
+  `${CODEX_HOME:-$HOME/.codex}/models_catalog.json` with Moon Bridge's official
+  generator.
+- Removes generated profile keys unsupported by Codex `0.141.0`, disables
+  apps/connectors only inside the DeepSeek profile, and keeps the base GPT
+  profile unchanged.
+- Installs and starts `codex-moonbridge.service` when user systemd is available.
+
+Use it from VS Code or a terminal with:
+
+```bash
+codex --profile deepseek-v4-pro
+codex exec --profile deepseek-v4-pro "Reply exactly: ok"
+```
+
+DeepSeek's official guide also supports a manual Moon Bridge setup:
 
 ```bash
 git clone https://github.com/ZhiYi-R/moon-bridge.git
@@ -190,7 +226,41 @@ model_provider = "openai"
 model_reasoning_effort = "xhigh"
 ```
 
-Put this in `$CODEX_HOME/deepseek-v4-pro.config.toml`:
+For the recommended Moon Bridge path, the generated
+`$CODEX_HOME/deepseek-v4-pro.config.toml` should look like this shape:
+
+```toml
+model = "moonbridge"
+model_provider = "moonbridge"
+model_context_window = 1000000
+model_reasoning_summary = "none"
+model_supports_reasoning_summaries = false
+model_catalog_json = "/home/you/.codex/models_catalog.json"
+
+[model_providers.moonbridge]
+name = "Moon Bridge"
+base_url = "http://127.0.0.1:38440/v1"
+wire_api = "responses"
+
+[features]
+apps = false
+
+[plugins."gmail@openai-curated"]
+enabled = false
+
+[plugins."github@openai-curated"]
+enabled = false
+
+[plugins."google-drive@openai-curated"]
+enabled = false
+```
+
+`features.apps = false` is profile-scoped. GPT remains the default in
+`~/.codex/config.toml`, and GPT keeps the existing app/plugin connector
+functionality.
+
+For the LiteLLM fallback, put this in
+`$CODEX_HOME/deepseek-v4-pro.config.toml`:
 
 ```toml
 model = "deepseek-v4-pro"
@@ -304,6 +374,16 @@ Check GPT still works:
 ```bash
 codex exec --profile gpt55 --strict-config --ephemeral --json "Reply exactly: ok"
 ```
+
+If DeepSeek returns an upstream schema error for a connector tool, confirm the
+DeepSeek profile contains:
+
+```toml
+[features]
+apps = false
+```
+
+The base GPT config can still keep apps/connectors enabled.
 
 ## References
 

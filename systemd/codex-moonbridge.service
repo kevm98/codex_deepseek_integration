@@ -1,0 +1,13 @@
+[Unit]
+Description=Moon Bridge for Codex DeepSeek profile
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=CODEX_HOME=%h/.codex
+ExecStart=%h/.codex/bin/codex-moonbridge
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

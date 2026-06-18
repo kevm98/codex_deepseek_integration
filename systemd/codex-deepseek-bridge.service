@@ -1,0 +1,16 @@
+[Unit]
+Description=Codex DeepSeek LiteLLM bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{CODEX_HOME}}
+Environment=PYTHONPATH={{CODEX_HOME}}
+Environment=NO_PROXY=127.0.0.1,localhost
+ExecStart=/usr/bin/env -u DEBUG {{CODEX_HOME}}/litellm-venv/bin/litellm --config {{CODEX_HOME}}/litellm-deepseek.yaml --host 127.0.0.1 --port 4000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

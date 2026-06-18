@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+VENV="$CODEX_HOME/litellm-venv"
+CONFIG="$CODEX_HOME/litellm-deepseek.yaml"
+PIDFILE="$CODEX_HOME/.tmp/litellm-deepseek.pid"
+LOGFILE="$CODEX_HOME/.tmp/litellm-deepseek.log"
+HOST="${LITELLM_DEEPSEEK_HOST:-127.0.0.1}"
+PORT="${LITELLM_DEEPSEEK_PORT:-4000}"
+SERVICE_NAME="codex-deepseek-bridge.service"
+
+mkdir -p "$CODEX_HOME/.tmp"
+
+is_running() {
+  if [ ! -f "$PIDFILE" ]; then
+    return 1
+  fi
+  local pid
+  pid="$(cat "$PIDFILE" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+service_exists() {
+  systemctl --user cat "$SERVICE_NAME" >/dev/null 2>&1
+}
+
+case "${1:-start}" in
+  start)
+    if service_exists; then
+      if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+        systemctl --user import-environment DEEPSEEK_API_KEY
+      fi
+      systemctl --user start "$SERVICE_NAME"
+      echo "LiteLLM DeepSeek bridge service started on http://$HOST:$PORT."
+      exit 0
+    fi
+
+    if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+      echo "DEEPSEEK_API_KEY is not set." >&2
+      exit 1
+    fi
+
+    if [ ! -x "$VENV/bin/litellm" ]; then
+      echo "LiteLLM is not installed at $VENV/bin/litellm." >&2
+      exit 1
+    fi
+
+    if is_running; then
+      echo "LiteLLM DeepSeek bridge already running on http://$HOST:$PORT (pid $(cat "$PIDFILE"))."
+      exit 0
+    fi
+
+    export NO_PROXY="${NO_PROXY:-127.0.0.1,localhost}"
+    export PYTHONPATH="$CODEX_HOME${PYTHONPATH:+:$PYTHONPATH}"
+    unset DEBUG
+
+    cd "$CODEX_HOME"
+    nohup "$VENV/bin/litellm" --config "$CONFIG" --host "$HOST" --port "$PORT" >> "$LOGFILE" 2>&1 &
+    pid="$!"
+    echo "$pid" > "$PIDFILE"
+    sleep 2
+
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "LiteLLM DeepSeek bridge failed to start. Last log lines:" >&2
+      tail -n 50 "$LOGFILE" >&2 || true
+      exit 1
+    fi
+
+    echo "LiteLLM DeepSeek bridge running on http://$HOST:$PORT (pid $pid)."
+    ;;
+
+  stop)
+    if service_exists; then
+      systemctl --user stop "$SERVICE_NAME"
+      echo "Stopped LiteLLM DeepSeek bridge service."
+      exit 0
+    fi
+
+    if is_running; then
+      pid="$(cat "$PIDFILE")"
+      kill "$pid"
+      rm -f "$PIDFILE"
+      echo "Stopped LiteLLM DeepSeek bridge (pid $pid)."
+    else
+      rm -f "$PIDFILE"
+      echo "LiteLLM DeepSeek bridge is not running."
+    fi
+    ;;
+
+  restart)
+    if service_exists; then
+      if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
+        systemctl --user import-environment DEEPSEEK_API_KEY
+      fi
+      systemctl --user restart "$SERVICE_NAME"
+      echo "Restarted LiteLLM DeepSeek bridge service on http://$HOST:$PORT."
+      exit 0
+    fi
+
+    "$0" stop
+    "$0" start
+    ;;
+
+  status)
+    if service_exists; then
+      systemctl --user --no-pager --lines=0 status "$SERVICE_NAME"
+      exit $?
+    fi
+
+    if is_running; then
+      echo "LiteLLM DeepSeek bridge is running on http://$HOST:$PORT (pid $(cat "$PIDFILE"))."
+    else
+      echo "LiteLLM DeepSeek bridge is not running."
+      exit 1
+    fi
+    ;;
+
+  logs)
+    if service_exists; then
+      journalctl --user -u "$SERVICE_NAME" -n "${2:-80}" --no-pager
+      exit 0
+    fi
+
+    tail -n "${2:-80}" "$LOGFILE"
+    ;;
+
+  *)
+    echo "Usage: $0 {start|stop|restart|status|logs [lines]}" >&2
+    exit 2
+    ;;
+esac

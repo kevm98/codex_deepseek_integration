@@ -1,0 +1,9 @@
+model_list:
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: deepseek/deepseek-v4-pro
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+litellm_settings:
+  callbacks: deepseek_codex_callbacks.proxy_handler_instance
+  drop_params: true

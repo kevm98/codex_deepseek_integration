@@ -1,7 +1,9 @@
 # Codex DeepSeek Integration
 
 Run `deepseek-v4-pro` from OpenAI Codex by putting a Responses-compatible bridge
-in front of DeepSeek and selecting the matching Codex custom provider.
+in front of DeepSeek and selecting the matching Codex custom provider. The CLI
+path uses a Codex profile; the VS Code picker path uses a small app-server
+wrapper so GPT models/history stay on the normal OpenAI provider.
 
 DeepSeek's official Codex guide recommends Moon Bridge for this. This repository
 documents that path and keeps the LiteLLM bridge as a fallback that was verified
@@ -40,6 +42,9 @@ The safe setup is:
    `model_provider`.
 4. Start DeepSeek sessions with the profile instead of only changing the model
    slug.
+5. For the VS Code Codex extension, point `chatgpt.cliExecutable` at the wrapper
+   installed by this repo so the extension's app-server can route DeepSeek
+   selections to Moon Bridge while keeping GPT selections unchanged.
 
 The model catalog only makes a model visible to Codex. It does not bind that
 model to a provider. If Codex selects `deepseek-v4-pro` while
@@ -77,7 +82,13 @@ provider.
 - `docs/moonbridge.md`: recommended Moon Bridge setup based on DeepSeek's guide.
 - `docs/litellm-fallback.md`: fallback setup verified on this machine.
 - `scripts/install-moonbridge.sh`: installs Go when needed, builds Moon Bridge,
-  generates the Codex profile/catalog, and starts the user service.
+  generates the Codex profile/catalog, installs the VS Code wrapper, and starts
+  the user service.
+- `scripts/codex-vscode-deepseek-bridge.js`: VS Code `chatgpt.cliExecutable`
+  wrapper that preserves GPT/OpenAI traffic and injects Moon Bridge provider
+  config for `deepseek-v4-pro`.
+- `scripts/test-vscode-deepseek-bridge.js`: unit tests for the VS Code wrapper
+  request rewriting and model-list injection.
 - `scripts/deepseek_codex_callbacks.py`: LiteLLM fallback callback that strips
   unsupported non-function tools.
 - `scripts/codex-deepseek-bridge`: LiteLLM fallback helper for starting,
@@ -88,6 +99,8 @@ provider.
   `deepseek-v4-pro`.
 - `examples/moonbridge-codex-profile.config.toml`: Codex profile shape generated
   by Moon Bridge.
+- `examples/vscode-settings.json`: VS Code `chatgpt.cliExecutable` example for
+  the model-picker wrapper.
 - `examples/config.toml`: conservative base Codex config that keeps GPT as the
   default.
 - `examples/deepseek-v4-pro.config.toml`: self-contained Codex profile for the
@@ -127,6 +140,8 @@ The installer:
 - Removes generated profile keys unsupported by Codex `0.141.0`, disables
   apps/connectors only inside the DeepSeek profile, and keeps the base GPT
   profile unchanged.
+- Installs `${CODEX_HOME:-$HOME/.codex}/bin/codex-vscode-deepseek-bridge` for
+  the VS Code Codex model picker.
 - Installs and starts `codex-moonbridge.service` when user systemd is available.
 
 Use it from VS Code or a terminal with:
@@ -184,6 +199,45 @@ The generated config uses `model_provider = "moonbridge"`,
 `wire_api = "responses"`, and a generated `models_catalog.json`.
 
 More detail: [docs/moonbridge.md](docs/moonbridge.md).
+
+## VS Code Codex model picker
+
+The OpenAI Codex VS Code extension starts `codex app-server` through the
+`chatgpt.cliExecutable` setting. The app-server model list has model ids, but
+the model-list items do not carry a provider id. That is why simply adding
+`deepseek-v4-pro` to a catalog can still produce:
+
+```text
+The 'deepseek-v4-pro' model is not supported when using Codex with a ChatGPT account.
+```
+
+Use the wrapper installed by `install-moonbridge.sh`:
+
+```json
+{
+  "chatgpt.cliExecutable": "/home/you/.codex/bin/codex-vscode-deepseek-bridge"
+}
+```
+
+Or let the installer set it:
+
+```bash
+CONFIGURE_VSCODE=1 ./scripts/install-moonbridge.sh
+```
+
+The wrapper does three things:
+
+- Starts the real VS Code-bundled Codex app-server with a temporary merged
+  model catalog, so GPT models and `deepseek-v4-pro` appear together.
+- Leaves normal GPT requests untouched, preserving your ChatGPT/OpenAI provider
+  and existing GPT history.
+- Rewrites new DeepSeek thread starts from `deepseek-v4-pro` to the Moon Bridge
+  route model `moonbridge` and injects `modelProvider = "moonbridge"` plus
+  DeepSeek-only app/connector disables.
+
+After changing `chatgpt.cliExecutable`, reload the VS Code window. Start a new
+Codex thread and choose `DeepSeek V4 Pro` from the model picker. Existing GPT
+threads remain GPT threads.
 
 ## Fallback: LiteLLM
 
@@ -384,6 +438,12 @@ apps = false
 ```
 
 The base GPT config can still keep apps/connectors enabled.
+
+Check the VS Code wrapper logic:
+
+```bash
+node ./scripts/test-vscode-deepseek-bridge.js
+```
 
 ## References
 

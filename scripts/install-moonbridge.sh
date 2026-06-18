@@ -17,6 +17,7 @@ MOONBRIDGE_ADDR="${MOONBRIDGE_ADDR:-127.0.0.1:38440}"
 MOONBRIDGE_CODEX_BASE_URL="${MOONBRIDGE_CODEX_BASE_URL:-http://127.0.0.1:38440/v1}"
 
 PROFILE_NAME="${PROFILE_NAME:-deepseek-v4-pro}"
+CONFIGURE_VSCODE="${CONFIGURE_VSCODE:-0}"
 
 log() {
   printf '[install-moonbridge] %s\n' "$*"
@@ -340,6 +341,49 @@ SERVICE
   log "Wrote ${service}"
 }
 
+install_vscode_bridge() {
+  local repo_root wrapper target
+  repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  wrapper="${repo_root}/scripts/codex-vscode-deepseek-bridge.js"
+  target="${CODEX_HOME_DIR}/bin/codex-vscode-deepseek-bridge"
+
+  [[ -f "$wrapper" ]] || die "missing VS Code bridge wrapper at ${wrapper}"
+  mkdir -p "${CODEX_HOME_DIR}/bin"
+  cp "$wrapper" "$target"
+  chmod 700 "$target"
+  log "Installed VS Code bridge wrapper at ${target}"
+
+  if [[ "$CONFIGURE_VSCODE" == "1" ]]; then
+    configure_vscode_cli_executable "$target"
+  else
+    log "To show DeepSeek in the VS Code Codex model picker, set chatgpt.cliExecutable to ${target}"
+    log "Or rerun with CONFIGURE_VSCODE=1 to update VS Code user settings automatically"
+  fi
+}
+
+configure_vscode_cli_executable() {
+  local target="$1"
+  node - "$target" <<'NODE'
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+
+const target = process.argv[2];
+const settingsPath = path.join(os.homedir(), ".config", "Code", "User", "settings.json");
+fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+
+let settings = {};
+if (fs.existsSync(settingsPath)) {
+  const raw = fs.readFileSync(settingsPath, "utf8").trim();
+  settings = raw ? JSON.parse(raw) : {};
+}
+
+settings["chatgpt.cliExecutable"] = target;
+fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
+console.log(`[install-moonbridge] Set chatgpt.cliExecutable in ${settingsPath}`);
+NODE
+}
+
 start_systemd_service_if_available() {
   if ! command -v systemctl >/dev/null 2>&1; then
     log "systemctl is not available; start Moon Bridge with ${CODEX_HOME_DIR}/bin/codex-moonbridge"
@@ -370,6 +414,7 @@ main() {
   write_gpt_profile_if_missing
   generate_codex_profile
   write_systemd_service
+  install_vscode_bridge
   start_systemd_service_if_available
 
   log "Done. Use: codex --profile ${PROFILE_NAME}"

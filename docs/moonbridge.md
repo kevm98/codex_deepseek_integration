@@ -46,6 +46,7 @@ It also writes:
 
 ```text
 ~/.codex/bin/codex-moonbridge
+~/.codex/bin/codex-vscode-deepseek-bridge
 ~/.codex/bin/moonbridge
 ~/.config/systemd/user/codex-moonbridge.service
 ```
@@ -98,6 +99,38 @@ wire_api = "responses"
 [features]
 apps = false
 ```
+
+## VS Code Model Picker
+
+The CLI profile above is enough for terminal Codex usage, but the VS Code Codex
+extension starts `codex app-server` and gets model choices from the app-server
+model list. That list does not include provider ids per model, so a plain
+`deepseek-v4-pro` catalog entry can still be sent to the default OpenAI provider
+and fail with:
+
+```text
+The 'deepseek-v4-pro' model is not supported when using Codex with a ChatGPT account.
+```
+
+Use the wrapper installed by the script:
+
+```json
+{
+  "chatgpt.cliExecutable": "/home/you/.codex/bin/codex-vscode-deepseek-bridge"
+}
+```
+
+The wrapper preserves normal GPT app-server traffic, adds DeepSeek to the model
+list, and injects `modelProvider = "moonbridge"` only when a new DeepSeek thread
+is started. To let the installer update VS Code user settings automatically,
+run:
+
+```bash
+CONFIGURE_VSCODE=1 ./scripts/install-moonbridge.sh
+```
+
+Then reload the VS Code window and start a new Codex thread with `DeepSeek V4
+Pro` selected. Existing GPT conversations keep using the OpenAI provider.
 
 ## Configure Moon Bridge
 

@@ -1,12 +1,5 @@
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
-model = "deepseek-v4-pro"
-model_provider = "deepseek"
+model = "gpt-5.5"
+model_provider = "openai"
 model_reasoning_effort = "xhigh"
-model_reasoning_summary = "none"
-model_catalog_json = "/home/you/.codex/codex-models-with-deepseek.json"
-
-[model_providers.deepseek]
-name = "DeepSeek via LiteLLM"
-base_url = "http://127.0.0.1:4000/v1"
-wire_api = "responses"

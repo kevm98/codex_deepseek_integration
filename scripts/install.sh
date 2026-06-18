@@ -23,6 +23,11 @@ fi
 install -m 0644 "$ROOT/scripts/deepseek_codex_callbacks.py" "$CODEX_HOME/deepseek_codex_callbacks.py"
 install -m 0644 "$ROOT/examples/litellm-deepseek.yaml" "$CODEX_HOME/litellm-deepseek.yaml"
 install -m 0755 "$ROOT/scripts/codex-deepseek-bridge" "$CODEX_HOME/bin/codex-deepseek-bridge"
+"$ROOT/scripts/append-deepseek-model-entry.sh" "$CODEX_HOME/codex-models-with-deepseek.json"
+sed "s#{{CODEX_HOME}}#$CODEX_HOME#g" \
+  "$ROOT/examples/deepseek-v4-pro.config.toml" \
+  > "$CODEX_HOME/deepseek-v4-pro.config.toml"
+install -m 0644 "$ROOT/examples/gpt55.config.toml" "$CODEX_HOME/gpt55.config.toml"
 
 if systemctl --user is-system-running >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"
@@ -37,3 +42,4 @@ else
 fi
 
 echo "Installed Codex DeepSeek bridge files under $CODEX_HOME."
+echo "Use: codex --profile deepseek-v4-pro"

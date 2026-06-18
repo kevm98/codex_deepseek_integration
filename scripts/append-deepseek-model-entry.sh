@@ -17,7 +17,13 @@ trap 'rm -f "$base_catalog" "$updated_catalog"' EXIT
 codex debug models > "$base_catalog"
 
 jq --slurpfile deepseek "$ROOT/examples/deepseek-model-entry.json" '
-  .models = ([.models[] | select(.slug != "deepseek-v4-pro")] + [$deepseek[0]])
+  if any(.models[]; .slug == "gpt-5.5") then
+    (.models[] | select(.slug == "gpt-5.5")) as $base |
+    ($base * $deepseek[0]) as $deepseek_model |
+    .models = ([.models[] | select(.slug != "deepseek-v4-pro")] + [$deepseek_model])
+  else
+    error("could not find gpt-5.5 in codex debug models output")
+  end
 ' "$base_catalog" > "$updated_catalog"
 
 install -m 0644 "$updated_catalog" "$OUT"

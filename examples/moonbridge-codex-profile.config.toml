@@ -1,0 +1,8 @@
+model = "moonbridge"
+model_provider = "moonbridge"
+model_catalog_json = "{{CODEX_HOME}}/models_catalog.json"
+
+[model_providers.moonbridge]
+name = "Moon Bridge"
+base_url = "http://127.0.0.1:38440/v1"
+wire_api = "responses"

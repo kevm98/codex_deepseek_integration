@@ -21,6 +21,15 @@ const DISABLED_CONNECTOR_PLUGINS = [
   "google-drive@openai-curated",
 ];
 
+// Thread-listing method names that the app-server might use.
+const THREAD_LIST_METHODS = new Set([
+  "thread/list",
+  "threads/list",
+  "thread/search",
+  "thread/listAll",
+  "threads/search",
+]);
+
 function codexHome() {
   return process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 }
@@ -123,6 +132,170 @@ function loadMoonBridgeCatalog(home = codexHome()) {
     return null;
   }
   return parseJsonObject(fs.readFileSync(catalogPath, "utf8"), catalogPath);
+}
+
+// ---------------------------------------------------------------------------
+// MoonBridge thread persistence: load threads from the local Codex state DB
+// so they survive restarts even when the active provider is "openai".
+// ---------------------------------------------------------------------------
+
+let _moonBridgeThreadCache = null;
+let _moonBridgeThreadCacheTs = 0;
+
+function loadMoonBridgeThreads(home) {
+  const now = Date.now();
+  // Refresh cache at most every 30 seconds.
+  if (_moonBridgeThreadCache && (now - _moonBridgeThreadCacheTs) < 30000) {
+    return _moonBridgeThreadCache;
+  }
+
+  const stateDb = path.join(home, "state_5.sqlite");
+  if (!fs.existsSync(stateDb)) {
+    log(`state DB not found at ${stateDb}, skipping moonbridge thread injection`);
+    _moonBridgeThreadCache = [];
+    _moonBridgeThreadCacheTs = now;
+    return _moonBridgeThreadCache;
+  }
+
+  const query = `
+SELECT
+  id,
+  title,
+  preview,
+  created_at,
+  updated_at,
+  model,
+  model_provider,
+  source,
+  cwd,
+  archived,
+  first_user_message,
+  reasoning_effort,
+  tokens_used
+FROM threads
+WHERE model_provider = 'moonbridge'
+  AND archived = 0
+  AND source = 'vscode'
+ORDER BY updated_at DESC
+LIMIT 200
+`.replace(/\n/g, " ").trim();
+
+  try {
+    const result = spawnSync("python3", ["-c", `
+import sqlite3, json, sys
+db = '${stateDb.replace(/'/g, "\\'")}'
+conn = sqlite3.connect(db)
+conn.row_factory = sqlite3.Row
+cur = conn.cursor()
+cur.execute("""${query.replace(/"/g, '\\"')}""")
+rows = [dict(r) for r in cur.fetchall()]
+conn.close()
+print(json.dumps(rows))
+`], {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 5000,
+    });
+
+    if (result.status !== 0 || !result.stdout.trim()) {
+      log(`python3 query failed: ${result.stderr || result.stdout || 'empty output'}`);
+      _moonBridgeThreadCache = [];
+      _moonBridgeThreadCacheTs = now;
+      return _moonBridgeThreadCache;
+    }
+
+    _moonBridgeThreadCache = JSON.parse(result.stdout.trim());
+    _moonBridgeThreadCacheTs = now;
+    log(`loaded ${_moonBridgeThreadCache.length} moonbridge threads from state DB`);
+    return _moonBridgeThreadCache;
+  } catch (err) {
+    log(`failed to load moonbridge threads: ${err.message}`);
+    _moonBridgeThreadCache = [];
+    _moonBridgeThreadCacheTs = now;
+    return _moonBridgeThreadCache;
+  }
+}
+
+/**
+ * Convert a DB thread row into a thread-list entry matching the
+ * format the Codex UI expects. We use a minimal shape so the UI
+ * can render thread cards and the bridge can rewrite on resume.
+ */
+function dbThreadToThreadEntry(t) {
+  return {
+    id: t.id,
+    title: t.title || "",
+    preview: t.preview || t.first_user_message || "",
+    created_at: t.created_at,
+    updated_at: t.updated_at,
+    model: t.model || DEEPSEEK_PICKER_MODEL,
+    model_provider: t.model_provider || MOONBRIDGE_PROVIDER_ID,
+    source: t.source || "vscode",
+    cwd: t.cwd || "",
+    archived: !!t.archived,
+    reasoning_effort: t.reasoning_effort || "high",
+    tokens_used: t.tokens_used || 0,
+  };
+}
+
+/**
+ * Returns true when `obj` looks like an array of thread-like objects.
+ */
+function looksLikeThreadList(obj) {
+  if (!Array.isArray(obj) || obj.length === 0) return false;
+  const first = obj[0];
+  return first && typeof first === "object" && first !== null &&
+    (typeof first.id === "string" || typeof first.thread_id === "string");
+}
+
+/**
+ * Extract the thread array from a result object, handling common shapes:
+ *   result                     (flat array)
+ *   result.data                (envelope)
+ *   result.threads
+ *   result.items
+ *   { threadList: [...] }
+ * Returns null if no thread array found.
+ */
+function extractThreadArray(result) {
+  if (!result || typeof result !== "object") return null;
+  if (Array.isArray(result) && looksLikeThreadList(result)) return result;
+  for (const key of ["data", "threads", "items", "threadList", "thread_list"]) {
+    if (Array.isArray(result[key]) && looksLikeThreadList(result[key])) {
+      return result[key];
+    }
+  }
+  return null;
+}
+
+/**
+ * Merge moonbridge threads into a thread-list response, deduplicating by id.
+ */
+function mergeMoonBridgeThreads(result, moonBridgeThreads) {
+  if (!result || typeof result !== "object") return result;
+
+  const threadArray = extractThreadArray(result);
+  if (!threadArray) return result; // not a thread list
+
+  const existing = new Set();
+  for (const t of threadArray) {
+    const tid = t.id || t.thread_id;
+    if (tid) existing.add(tid);
+  }
+
+  let added = 0;
+  for (const t of moonBridgeThreads) {
+    if (existing.has(t.id)) continue;
+    threadArray.push(dbThreadToThreadEntry(t));
+    existing.add(t.id);
+    added++;
+  }
+
+  if (added > 0) {
+    log(`merged ${added} moonbridge threads into thread list (total now ${threadArray.length})`);
+  }
+
+  return result;
 }
 
 function cloneForPickerModel(source) {
@@ -342,6 +515,13 @@ function buildAppServerArgs(originalArgs, catalogPath) {
     `model_catalog_json="${catalogPath}"`,
     "-c",
     MOONBRIDGE_PROVIDER_TOML,
+    // Force the default model to GPT-5.5 so thread listing uses the
+    // OpenAI provider (which has GPT threads). Moonbridge threads are
+    // injected on the response side below.
+    "-c",
+    'model="gpt-5.5"',
+    "-c",
+    'model_provider="openai"',
     ...originalArgs.slice(appServerIndex + 1),
   ];
 }
@@ -374,6 +554,7 @@ function runProxy(realCodex, args) {
   const catalogPath = writeMergedCatalog(realCodex);
   const childArgs = buildAppServerArgs(args, catalogPath);
   const pendingMethods = new Map();
+  const home = codexHome();
 
   log(`starting ${realCodex} ${childArgs.join(" ")}`);
   const child = spawn(realCodex, childArgs, {
@@ -391,9 +572,26 @@ function runProxy(realCodex, args) {
   pipeJsonLines(child.stdout, process.stdout, (message) => {
     if (message && Object.prototype.hasOwnProperty.call(message, "id")) {
       const key = String(message.id);
-      if (pendingMethods.get(key) === "model/list" && message.result) {
+      const method = pendingMethods.get(key);
+
+      // Inject DeepSeek into the model list.
+      if (method === "model/list" && message.result) {
         message.result = ensureDeepSeekInModelList(message.result);
       }
+
+      // Merge moonbridge threads into any thread-listing response.
+      if (message.result) {
+        const isThreadListMethod = method && THREAD_LIST_METHODS.has(method);
+        const hasThreadArray = extractThreadArray(message.result) !== null;
+
+        if (isThreadListMethod || hasThreadArray) {
+          const moonBridgeThreads = loadMoonBridgeThreads(home);
+          if (moonBridgeThreads.length > 0) {
+            message.result = mergeMoonBridgeThreads(message.result, moonBridgeThreads);
+          }
+        }
+      }
+
       pendingMethods.delete(key);
     }
     return message;

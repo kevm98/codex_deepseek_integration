@@ -44,6 +44,16 @@ systemctl --user import-environment DEEPSEEK_API_KEY
 systemctl --user restart codex-moonbridge.service
 ```
 
+For reboot-safe startup, rerun the Moon Bridge installer after exporting the
+key. It writes `~/.config/codex-deepseek/moonbridge.env` with mode `600`, and
+the generated `~/.codex/bin/codex-moonbridge` launcher loads that file when the
+service starts before your shell has exported the variable:
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+./scripts/install-moonbridge.sh
+```
+
 ## Wrong provider selected
 
 **Symptom:** Codex uses the OpenAI provider even when `deepseek-v4-pro` is
@@ -196,3 +206,42 @@ unrecognized key errors.
 **Fix:** The installer removes keys that Codex 0.141.0 rejects (such as
 `model_max_output_tokens`).  If you set up manually and see this error, remove
 those keys from the profile.
+
+## DeepSeek threads disappear after reboot
+
+**Symptom:** After restarting your computer and reopening VS Code, only GPT
+threads appear in the Codex thread list. DeepSeek threads are missing even
+though they existed before the reboot.
+
+**Cause:** Codex lists threads from the default provider. When the default
+config uses the OpenAI provider, only OpenAI-managed threads appear. DeepSeek
+threads, which are routed through the Moon Bridge provider, are stored locally
+in the Codex state database but were not being merged into the thread list
+response.
+
+**Fix:** The VS Code bridge now intercepts thread-listing responses and merges
+Moon Bridge threads from the local state database (`~/.codex/state_*.sqlite`).
+Re-run the Moon Bridge installer to get the updated bridge:
+
+```bash
+cd /home/rrlab/codex_deepseek_integration
+./scripts/install-moonbridge.sh
+```
+
+Then reload the VS Code window (Ctrl+Shift+P → Developer: Reload Window).
+
+**Manual fix if the installer doesn't apply:**
+
+```bash
+cp /home/rrlab/codex_deepseek_integration/scripts/codex-vscode-deepseek-bridge.js \
+   ~/.codex/bin/codex-vscode-deepseek-bridge
+chmod +x ~/.codex/bin/codex-vscode-deepseek-bridge
+```
+
+Also ensure the default `~/.codex/config.toml` uses GPT as the default model:
+
+```toml
+model = "gpt-5.5"
+model_provider = "openai"
+model_reasoning_effort = "xhigh"
+```

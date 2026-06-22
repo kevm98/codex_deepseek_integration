@@ -97,6 +97,61 @@ function testModelListInjection() {
   assert.equal(deepseek.defaultReasoningEffort, "high");
 }
 
+function testModelListInjectionWithModelsEnvelope() {
+  const result = {
+    models: [
+      {
+        slug: "gpt-5.5",
+        display_name: "GPT-5.5",
+        visibility: "list",
+      },
+    ],
+  };
+
+  bridge.ensureDeepSeekInModelList(result);
+  const deepseek = result.models.find((model) => model.id === "deepseek-v4-pro");
+  assert.ok(deepseek);
+  assert.equal(deepseek.model, "deepseek-v4-pro");
+  assert.equal(deepseek.displayName, "DeepSeek V4 Pro");
+  assert.equal(deepseek.visibility, "list");
+}
+
+function testModelListNormalizesExistingSlugEntry() {
+  const result = {
+    items: [
+      {
+        id: "deepseek-v4-pro",
+        slug: "stale-deepseek-alias",
+        display_name: "DeepSeek V4 Pro",
+        visibility: "hide",
+      },
+    ],
+  };
+
+  bridge.ensureDeepSeekInModelList(result);
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].id, "deepseek-v4-pro");
+  assert.equal(result.items[0].model, "deepseek-v4-pro");
+  assert.equal(result.items[0].slug, "deepseek-v4-pro");
+  assert.equal(result.items[0].hidden, false);
+  assert.equal(result.items[0].visibility, "list");
+}
+
+function testBareModelListInjection() {
+  const result = [
+    {
+      id: "gpt-5.5",
+      model: "gpt-5.5",
+      displayName: "GPT-5.5",
+    },
+  ];
+
+  bridge.ensureDeepSeekInModelList(result);
+  const deepseek = result.find((model) => model.id === "deepseek-v4-pro");
+  assert.ok(deepseek);
+  assert.equal(deepseek.model, "deepseek-v4-pro");
+}
+
 function testCatalogMerge() {
   const bundled = {
     models: [
@@ -140,6 +195,10 @@ function testAppServerArgs() {
     'model_catalog_json="/tmp/models.json"',
     "-c",
     'model_providers.moonbridge={ name = "Moon Bridge", base_url = "http://127.0.0.1:38440/v1", wire_api = "responses" }',
+    "-c",
+    'model="gpt-5.5"',
+    "-c",
+    'model_provider="openai"',
     "--analytics-default-enabled",
   ]);
 }
@@ -149,6 +208,9 @@ testGptThreadStartIsUntouched();
 testThreadResumeRewrite();
 testSettingsRewrite();
 testModelListInjection();
+testModelListInjectionWithModelsEnvelope();
+testModelListNormalizesExistingSlugEntry();
+testBareModelListInjection();
 testCatalogMerge();
 testAppServerArgs();
 

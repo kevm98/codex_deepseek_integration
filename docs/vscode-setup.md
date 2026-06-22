@@ -96,7 +96,8 @@ GPT model selections pass through unchanged.
 
 **Model does not appear in the picker:** Make sure `install-moonbridge.sh` ran
 successfully and generated `~/.codex/models_catalog.json`.  Reload the VS Code
-window.
+window.  If you pulled a newer version of this repo, rerun the installer so
+VS Code uses the updated wrapper under `~/.codex/bin`.
 
 **DeepSeek selected but fails with ChatGPT account error:** The wrapper may not
 be active.  Check that `chatgpt.cliExecutable` points to the correct wrapper

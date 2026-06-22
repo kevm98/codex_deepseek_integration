@@ -44,15 +44,18 @@ systemctl --user import-environment DEEPSEEK_API_KEY
 systemctl --user restart codex-moonbridge.service
 ```
 
-For reboot-safe startup, rerun the Moon Bridge installer after exporting the
-key. It writes `~/.config/codex-deepseek/moonbridge.env` with mode `600`, and
-the generated `~/.codex/bin/codex-moonbridge` launcher loads that file when the
-service starts before your shell has exported the variable:
+For installer-managed systemd startup, rerun the Moon Bridge installer after
+exporting the key so the user service imports the current environment:
 
 ```bash
 export DEEPSEEK_API_KEY="sk-..."
 ./scripts/install-moonbridge.sh
 ```
+
+This repo intentionally does not write the API key to a persistent env file.
+If your systemd user service starts after a reboot without your shell
+environment, export the key again, then rerun the import/restart commands
+above.
 
 ## Wrong provider selected
 

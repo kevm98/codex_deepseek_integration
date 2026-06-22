@@ -291,6 +291,8 @@ generate_codex_profile() {
     /^\[/ && skip { skip = 0 }
     skip { next }
     $1 == "model_max_output_tokens" { next }
+    $1 == "model_reasoning_effort" { next }
+    $1 == "plan_mode_reasoning_effort" { next }
     { print }
     $1 == "model_context_window" {
       print "model_reasoning_summary = \"none\""
@@ -299,6 +301,19 @@ generate_codex_profile() {
   ' "$profile" > "$sanitized"
   mv "$sanitized" "$profile"
   cat >> "$profile" <<'TOML'
+
+model_reasoning_effort = "xhigh"
+plan_mode_reasoning_effort = "xhigh"
+developer_instructions = """
+DeepSeek Codex agentic operating rules:
+- Treat implementation, debugging, review, install, and verification prompts as agent tasks. Gather context, make the needed changes, run the relevant checks, install updated runtime artifacts when the user asks, and stop only when the task is complete or genuinely blocked.
+- Keep working across multiple tool calls. If the first command or test fails, inspect the failure, try the next reasonable diagnostic or narrower fix, and continue until you have a verified result.
+- For non-trivial tasks, maintain an explicit plan or checklist, update it as work progresses, and use it to avoid stopping after partial progress.
+- Prefer concrete repository evidence over guesses. Read the nearby code, docs, generated config, and runtime logs before deciding.
+- Preserve normal GPT/OpenAI behavior. Only change DeepSeek/Moon Bridge routing or DeepSeek-specific configuration unless the user explicitly asks for broader changes.
+- Before final output, verify the live path that matters: unit tests for wrapper changes, Codex CLI smoke tests for profile changes, and app-server probes for VS Code model-picker behavior.
+- If the user asks to keep working until success, do not hand back a proposal when you can safely act. Implement, test, install, and report the exact remaining blocker only if external approval, credentials, or unavailable services prevent completion.
+"""
 
 # DeepSeek rejects some inherited connector tool schemas that GPT accepts.
 # Disable apps/connectors and connector plugins only for this profile; the base

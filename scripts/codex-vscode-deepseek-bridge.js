@@ -8,6 +8,14 @@ const readline = require("node:readline");
 const { spawn, spawnSync } = require("node:child_process");
 
 const DEEPSEEK_PICKER_MODEL = "deepseek-v4-pro";
+const DEEPSEEK_PICKER_MODELS = new Set([
+  "deepseek-v4-pro",
+  "deepseek-v4-flash",
+]);
+const DEEPSEEK_MODEL_DISPLAY_NAMES = {
+  "deepseek-v4-pro": "DeepSeek V4 Pro",
+  "deepseek-v4-flash": "DeepSeek V4 Flash",
+};
 const MOONBRIDGE_ROUTE_MODEL = "moonbridge";
 const MOONBRIDGE_PROVIDER_ID = "moonbridge";
 const MOONBRIDGE_BASE_URL = process.env.MOONBRIDGE_CODEX_BASE_URL || "http://127.0.0.1:38440/v1";
@@ -20,6 +28,17 @@ const DISABLED_CONNECTOR_PLUGINS = [
   "github@openai-curated",
   "google-drive@openai-curated",
 ];
+
+const DEEPSEEK_AGENTIC_INSTRUCTIONS = `
+DeepSeek Codex agentic operating rules:
+- Treat implementation, debugging, review, install, and verification prompts as agent tasks. Gather context, make the needed changes, run the relevant checks, install updated runtime artifacts when the user asks, and stop only when the task is complete or genuinely blocked.
+- Keep working across multiple tool calls. If the first command or test fails, inspect the failure, try the next reasonable diagnostic or narrower fix, and continue until you have a verified result.
+- For non-trivial tasks, maintain an explicit plan or checklist, update it as work progresses, and use it to avoid stopping after partial progress.
+- Prefer concrete repository evidence over guesses. Read the nearby code, docs, generated config, and runtime logs before deciding.
+- Preserve normal GPT/OpenAI behavior. Only change DeepSeek/Moon Bridge routing or DeepSeek-specific configuration unless the user explicitly asks for broader changes.
+- Before final output, verify the live path that matters: unit tests for wrapper changes, Codex CLI smoke tests for profile changes, and app-server probes for VS Code model-picker behavior.
+- If the user asks to keep working until success, do not hand back a proposal when you can safely act. Implement, test, install, and report the exact remaining blocker only if external approval, credentials, or unavailable services prevent completion.
+`.trim();
 
 // Thread-listing method names that the app-server might use.
 const THREAD_LIST_METHODS = new Set([
@@ -307,11 +326,15 @@ function mergeMoonBridgeThreads(result, moonBridgeThreads) {
   return result;
 }
 
-function cloneForPickerModel(source) {
+function deepSeekDisplayName(model) {
+  return DEEPSEEK_MODEL_DISPLAY_NAMES[model] || model;
+}
+
+function cloneForPickerModel(source, model = DEEPSEEK_PICKER_MODEL) {
   const cloned = JSON.parse(JSON.stringify(source));
-  cloned.slug = DEEPSEEK_PICKER_MODEL;
-  cloned.display_name = "DeepSeek V4 Pro";
-  cloned.description = "DeepSeek V4 Pro via Moon Bridge";
+  cloned.slug = model;
+  cloned.display_name = deepSeekDisplayName(model);
+  cloned.description = `${deepSeekDisplayName(model)} via Moon Bridge`;
   cloned.visibility = "list";
   cloned.priority = Math.max(Number(source.priority || 0), 0);
   return cloned;
@@ -336,7 +359,7 @@ function fallbackMoonBridgeEntry(bundledCatalog) {
   entry.context_window = Math.max(Number(entry.context_window || 0), 1000000);
   entry.max_context_window = Math.max(Number(entry.max_context_window || 0), 1000000);
   entry.effective_context_window_percent = entry.effective_context_window_percent || 95;
-  entry.default_reasoning_level = "high";
+  entry.default_reasoning_level = "xhigh";
   entry.supported_reasoning_levels = [
     { effort: "high", description: "High reasoning effort" },
     { effort: "xhigh", description: "Extra high reasoning effort" },
@@ -366,12 +389,15 @@ function mergeModelCatalogs(bundledCatalog, moonBridgeCatalog) {
   routeModel.description = routeModel.description || "DeepSeek V4 Pro route through Moon Bridge";
   routeModel.visibility = "hide";
 
-  if (!bySlug.has(DEEPSEEK_PICKER_MODEL)) {
-    bySlug.set(DEEPSEEK_PICKER_MODEL, cloneForPickerModel(routeModel));
-  } else {
-    const pickerModel = bySlug.get(DEEPSEEK_PICKER_MODEL);
-    pickerModel.display_name = pickerModel.display_name || "DeepSeek V4 Pro";
-    pickerModel.visibility = "list";
+  for (const model of DEEPSEEK_PICKER_MODELS) {
+    if (!bySlug.has(model)) {
+      bySlug.set(model, cloneForPickerModel(routeModel, model));
+    } else {
+      const pickerModel = bySlug.get(model);
+      pickerModel.display_name = pickerModel.display_name || deepSeekDisplayName(model);
+      pickerModel.description = pickerModel.description || `${deepSeekDisplayName(model)} via Moon Bridge`;
+      pickerModel.visibility = "list";
+    }
   }
 
   return {
@@ -392,19 +418,20 @@ function writeMergedCatalog(realCodex) {
   return catalogPath;
 }
 
-function deepSeekModelListEntry() {
+function deepSeekModelListEntry(model = DEEPSEEK_PICKER_MODEL) {
+  const displayName = deepSeekDisplayName(model);
   return {
-    id: DEEPSEEK_PICKER_MODEL,
-    model: DEEPSEEK_PICKER_MODEL,
-    slug: DEEPSEEK_PICKER_MODEL,
-    displayName: "DeepSeek V4 Pro",
-    display_name: "DeepSeek V4 Pro",
-    description: "DeepSeek V4 Pro via Moon Bridge",
+    id: model,
+    model,
+    slug: model,
+    displayName,
+    display_name: displayName,
+    description: `${displayName} via Moon Bridge`,
     hidden: false,
     visibility: "list",
     isDefault: false,
-    defaultReasoningEffort: "high",
-    default_reasoning_level: "high",
+    defaultReasoningEffort: "xhigh",
+    default_reasoning_level: "xhigh",
     supportedReasoningEfforts: [
       { reasoningEffort: "high", description: "High reasoning effort" },
       { reasoningEffort: "xhigh", description: "Extra high reasoning effort" },
@@ -421,22 +448,23 @@ function deepSeekModelListEntry() {
   };
 }
 
-function normalizeDeepSeekModelListEntry(entry) {
-  entry.id = DEEPSEEK_PICKER_MODEL;
-  entry.model = DEEPSEEK_PICKER_MODEL;
-  entry.slug = DEEPSEEK_PICKER_MODEL;
-  entry.displayName = entry.displayName || entry.display_name || "DeepSeek V4 Pro";
+function normalizeDeepSeekModelListEntry(entry, model = DEEPSEEK_PICKER_MODEL) {
+  const displayName = deepSeekDisplayName(model);
+  entry.id = model;
+  entry.model = model;
+  entry.slug = model;
+  entry.displayName = entry.displayName || entry.display_name || displayName;
   entry.display_name = entry.display_name || entry.displayName;
-  entry.description = entry.description || "DeepSeek V4 Pro via Moon Bridge";
+  entry.description = entry.description || `${displayName} via Moon Bridge`;
   entry.hidden = false;
   entry.isDefault = false;
   entry.visibility = "list";
-  entry.defaultReasoningEffort = entry.defaultReasoningEffort || "high";
-  entry.default_reasoning_level = entry.default_reasoning_level || "high";
+  entry.defaultReasoningEffort = "xhigh";
+  entry.default_reasoning_level = "xhigh";
   entry.supportedReasoningEfforts =
     entry.supportedReasoningEfforts?.length
       ? entry.supportedReasoningEfforts
-      : deepSeekModelListEntry().supportedReasoningEfforts;
+      : deepSeekModelListEntry(model).supportedReasoningEfforts;
   entry.supported_reasoning_levels =
     entry.supported_reasoning_levels?.length
       ? entry.supported_reasoning_levels
@@ -475,29 +503,49 @@ function ensureDeepSeekInModelList(result) {
     return result;
   }
 
-  const existing = modelArray.find((model) =>
-    model.id === DEEPSEEK_PICKER_MODEL ||
-    model.model === DEEPSEEK_PICKER_MODEL ||
-    model.slug === DEEPSEEK_PICKER_MODEL
-  );
-  if (existing) {
-    normalizeDeepSeekModelListEntry(existing);
-    return result;
+  for (const model of DEEPSEEK_PICKER_MODELS) {
+    const existing = modelArray.find((entry) =>
+      entry.id === model ||
+      entry.model === model ||
+      entry.slug === model
+    );
+    if (existing) {
+      normalizeDeepSeekModelListEntry(existing, model);
+      continue;
+    }
+
+    modelArray.push(normalizeDeepSeekModelListEntry(deepSeekModelListEntry(model), model));
   }
 
-  modelArray.push(normalizeDeepSeekModelListEntry(deepSeekModelListEntry()));
   return result;
 }
 
 function isDeepSeekSelection(model) {
-  return model === DEEPSEEK_PICKER_MODEL || model === MOONBRIDGE_ROUTE_MODEL;
+  return DEEPSEEK_PICKER_MODELS.has(model) || model === MOONBRIDGE_ROUTE_MODEL;
+}
+
+function routeDeepSeekModel(model) {
+  return DEEPSEEK_PICKER_MODELS.has(model) ? model : MOONBRIDGE_ROUTE_MODEL;
+}
+
+function mergeAgenticInstructions(existing) {
+  if (!existing) {
+    return DEEPSEEK_AGENTIC_INSTRUCTIONS;
+  }
+  if (existing.includes("DeepSeek Codex agentic operating rules:")) {
+    return existing;
+  }
+  return `${existing.trim()}\n\n${DEEPSEEK_AGENTIC_INSTRUCTIONS}`;
 }
 
 function mergeDeepSeekThreadConfig(config) {
   const next = { ...(config || {}) };
   next.model_provider = MOONBRIDGE_PROVIDER_ID;
+  next.model_reasoning_effort = "xhigh";
+  next.plan_mode_reasoning_effort = "xhigh";
   next.model_reasoning_summary = "none";
   next.model_supports_reasoning_summaries = false;
+  next.developer_instructions = mergeAgenticInstructions(next.developer_instructions);
   next.model_providers = {
     ...(next.model_providers || {}),
     [MOONBRIDGE_PROVIDER_ID]: {
@@ -528,7 +576,7 @@ function rewriteDeepSeekStartParams(params) {
     return params;
   }
 
-  params.model = MOONBRIDGE_ROUTE_MODEL;
+  params.model = routeDeepSeekModel(params.model);
   params.modelProvider = MOONBRIDGE_PROVIDER_ID;
   params.config = mergeDeepSeekThreadConfig(params.config);
   return params;
@@ -539,7 +587,7 @@ function rewriteDeepSeekSettingsParams(params) {
     return params;
   }
 
-  params.model = MOONBRIDGE_ROUTE_MODEL;
+  params.model = routeDeepSeekModel(params.model);
   if (Object.prototype.hasOwnProperty.call(params, "summary")) {
     params.summary = "none";
   }
@@ -700,16 +748,20 @@ if (require.main === module) {
 
 module.exports = {
   DEEPSEEK_PICKER_MODEL,
+  DEEPSEEK_PICKER_MODELS,
   MOONBRIDGE_PROVIDER_ID,
   MOONBRIDGE_ROUTE_MODEL,
   buildAppServerArgs,
   cloneForPickerModel,
   deepSeekModelListEntry,
+  deepSeekDisplayName,
   ensureDeepSeekInModelList,
   extractModelArray,
   isDeepSeekSelection,
+  mergeAgenticInstructions,
   mergeDeepSeekThreadConfig,
   mergeModelCatalogs,
+  routeDeepSeekModel,
   rewriteClientMessage,
   rewriteDeepSeekSettingsParams,
   rewriteDeepSeekStartParams,

@@ -30,6 +30,15 @@ const THREAD_LIST_METHODS = new Set([
   "threads/search",
 ]);
 
+const MODEL_LIST_METHODS = new Set([
+  "model/list",
+  "models/list",
+  "model/listAll",
+  "models/listAll",
+  "model/search",
+  "models/search",
+]);
+
 function codexHome() {
   return process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 }
@@ -387,14 +396,22 @@ function deepSeekModelListEntry() {
   return {
     id: DEEPSEEK_PICKER_MODEL,
     model: DEEPSEEK_PICKER_MODEL,
+    slug: DEEPSEEK_PICKER_MODEL,
     displayName: "DeepSeek V4 Pro",
+    display_name: "DeepSeek V4 Pro",
     description: "DeepSeek V4 Pro via Moon Bridge",
     hidden: false,
+    visibility: "list",
     isDefault: false,
     defaultReasoningEffort: "high",
+    default_reasoning_level: "high",
     supportedReasoningEfforts: [
       { reasoningEffort: "high", description: "High reasoning effort" },
       { reasoningEffort: "xhigh", description: "Extra high reasoning effort" },
+    ],
+    supported_reasoning_levels: [
+      { effort: "high", description: "High reasoning effort" },
+      { effort: "xhigh", description: "Extra high reasoning effort" },
     ],
     inputModalities: ["text"],
     additionalSpeedTiers: [],
@@ -404,27 +421,71 @@ function deepSeekModelListEntry() {
   };
 }
 
+function normalizeDeepSeekModelListEntry(entry) {
+  entry.id = DEEPSEEK_PICKER_MODEL;
+  entry.model = DEEPSEEK_PICKER_MODEL;
+  entry.slug = DEEPSEEK_PICKER_MODEL;
+  entry.displayName = entry.displayName || entry.display_name || "DeepSeek V4 Pro";
+  entry.display_name = entry.display_name || entry.displayName;
+  entry.description = entry.description || "DeepSeek V4 Pro via Moon Bridge";
+  entry.hidden = false;
+  entry.isDefault = false;
+  entry.visibility = "list";
+  entry.defaultReasoningEffort = entry.defaultReasoningEffort || "high";
+  entry.default_reasoning_level = entry.default_reasoning_level || "high";
+  entry.supportedReasoningEfforts =
+    entry.supportedReasoningEfforts?.length
+      ? entry.supportedReasoningEfforts
+      : deepSeekModelListEntry().supportedReasoningEfforts;
+  entry.supported_reasoning_levels =
+    entry.supported_reasoning_levels?.length
+      ? entry.supported_reasoning_levels
+      : [
+          { effort: "high", description: "High reasoning effort" },
+          { effort: "xhigh", description: "Extra high reasoning effort" },
+        ];
+  entry.inputModalities = entry.inputModalities?.length ? entry.inputModalities : ["text"];
+  entry.additionalSpeedTiers = entry.additionalSpeedTiers || [];
+  entry.serviceTiers = entry.serviceTiers || [];
+  entry.supportsPersonality = entry.supportsPersonality || false;
+  if (!Object.prototype.hasOwnProperty.call(entry, "upgrade")) {
+    entry.upgrade = null;
+  }
+  return entry;
+}
+
+function extractModelArray(result) {
+  if (Array.isArray(result)) {
+    return result;
+  }
+  if (!result || typeof result !== "object") {
+    return null;
+  }
+  for (const key of ["data", "models", "items"]) {
+    if (Array.isArray(result[key])) {
+      return result[key];
+    }
+  }
+  return null;
+}
+
 function ensureDeepSeekInModelList(result) {
-  if (!result || !Array.isArray(result.data)) {
+  const modelArray = extractModelArray(result);
+  if (!modelArray) {
     return result;
   }
 
-  const existing = result.data.find((model) => model.id === DEEPSEEK_PICKER_MODEL || model.model === DEEPSEEK_PICKER_MODEL);
+  const existing = modelArray.find((model) =>
+    model.id === DEEPSEEK_PICKER_MODEL ||
+    model.model === DEEPSEEK_PICKER_MODEL ||
+    model.slug === DEEPSEEK_PICKER_MODEL
+  );
   if (existing) {
-    existing.id = DEEPSEEK_PICKER_MODEL;
-    existing.model = DEEPSEEK_PICKER_MODEL;
-    existing.displayName = existing.displayName || "DeepSeek V4 Pro";
-    existing.description = existing.description || "DeepSeek V4 Pro via Moon Bridge";
-    existing.hidden = false;
-    existing.isDefault = false;
-    existing.defaultReasoningEffort = existing.defaultReasoningEffort || "high";
-    existing.supportedReasoningEfforts =
-      existing.supportedReasoningEfforts?.length ? existing.supportedReasoningEfforts : deepSeekModelListEntry().supportedReasoningEfforts;
-    existing.inputModalities = existing.inputModalities?.length ? existing.inputModalities : ["text"];
+    normalizeDeepSeekModelListEntry(existing);
     return result;
   }
 
-  result.data.push(deepSeekModelListEntry());
+  modelArray.push(normalizeDeepSeekModelListEntry(deepSeekModelListEntry()));
   return result;
 }
 
@@ -575,7 +636,7 @@ function runProxy(realCodex, args) {
       const method = pendingMethods.get(key);
 
       // Inject DeepSeek into the model list.
-      if (method === "model/list" && message.result) {
+      if (method && MODEL_LIST_METHODS.has(method) && message.result) {
         message.result = ensureDeepSeekInModelList(message.result);
       }
 
@@ -645,6 +706,7 @@ module.exports = {
   cloneForPickerModel,
   deepSeekModelListEntry,
   ensureDeepSeekInModelList,
+  extractModelArray,
   isDeepSeekSelection,
   mergeDeepSeekThreadConfig,
   mergeModelCatalogs,
